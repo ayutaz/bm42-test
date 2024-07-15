@@ -4,6 +4,10 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 import numpy as np
 
+# GPUが利用可能かどうかを確認し、デバイスを設定
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
 # サンプルデータセット
 documents = [
     "Hello world is a common phrase in programming",
@@ -12,12 +16,10 @@ documents = [
     "Machine learning models can be complex",
 ]
 
-
 # BM25のための関数
 def compute_idf(term: str, documents: List[str]) -> float:
     doc_freq = sum(1 for doc in documents if term in doc)
     return math.log((len(documents) - doc_freq + 0.5) / (doc_freq + 0.5) + 1)
-
 
 def compute_bm25_score(query: str, document: str, documents: List[str], k1: float = 1.5, b: float = 0.75) -> float:
     query_terms = query.lower().split()
@@ -37,14 +39,14 @@ def compute_bm25_score(query: str, document: str, documents: List[str], k1: floa
 
     return score
 
-
 # BM42のための関数
 def get_bm42_weights(text: str, model, tokenizer):
     inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+    inputs = {k: v.to(device) for k, v in inputs.items()}  # Move inputs to GPU
     with torch.no_grad():
         outputs = model(**inputs, output_attentions=True)
 
-    attentions = outputs.attentions[-1][0, :, 0].mean(dim=0)
+    attentions = outputs.attentions[-1][0, :, 0].mean(dim=0).cpu()  # Move back to CPU for further processing
     tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
 
     word_weights = {}
@@ -66,11 +68,9 @@ def get_bm42_weights(text: str, model, tokenizer):
 
     return word_weights
 
-
 # モデルとトークナイザーの初期化
 tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
-model = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
-
+model = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2").to(device)  # Move model to GPU
 
 # BM42スコアの計算
 def compute_bm42_score(query: str, document: str, documents: List[str]) -> float:
@@ -85,7 +85,6 @@ def compute_bm42_score(query: str, document: str, documents: List[str]) -> float
 
     return score
 
-
 # 検索関数
 def search(query: str, documents: List[str], method: str = "bm25") -> List[Dict[str, float]]:
     scores = []
@@ -99,7 +98,6 @@ def search(query: str, documents: List[str], method: str = "bm25") -> List[Dict[
         scores.append({"document": doc, "score": score})
 
     return sorted(scores, key=lambda x: x["score"], reverse=True)
-
 
 # 使用例
 query = "programming language"
